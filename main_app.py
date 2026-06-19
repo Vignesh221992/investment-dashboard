@@ -66,9 +66,15 @@ def fetch_live_gainers_api(universe_pool):
         parsed_results = []
         for q in quotes:
             symbol = q.get("symbol")
+            mkt_cap_raw = q.get("marketCap", 0)
+            mkt_cap_billions = mkt_cap_raw / 1e9 if mkt_cap_raw else 0
             
-            # Apply index filter only if the live reference lists loaded successfully
+            # Strict Filtering Rules: 
+            # 1. Must belong to the index universe (if successfully loaded)
             if universe_pool and symbol not in universe_pool:
+                continue
+            # 2. Market Cap must be >= $50 Billion
+            if mkt_cap_billions < 50:
                 continue
                 
             parsed_results.append({
@@ -77,7 +83,7 @@ def fetch_live_gainers_api(universe_pool):
                 "Price ($)": round(q.get("regularMarketPrice", 0), 2) if q.get("regularMarketPrice") else "N/A",
                 "Change ($)": round(q.get("regularMarketChange", 0), 2) if q.get("regularMarketChange") else "N/A",
                 "Change (%)": f"{q.get('regularMarketChangePercent', 0):+.2f}%" if q.get('regularMarketChangePercent') is not None else "N/A",
-                "Market Cap ($B)": round(q.get("marketCap", 0) / 1e9, 2) if q.get("marketCap") else "N/A"
+                "Market Cap ($B)": round(mkt_cap_billions, 2)
             })
             if len(parsed_results) >= 10:
                 break
@@ -87,7 +93,7 @@ def fetch_live_gainers_api(universe_pool):
     except Exception:
         pass
         
-    return pd.DataFrame({"Notice": ["Live Yahoo data stream temporarily busy. Please refresh the page or open a scanner tool via the sidebar."] * 5})
+    return pd.DataFrame({"Notice": ["No large-cap market gainers matching criteria found, or data stream temporarily busy."] * 5})
 
 @st.cache_data(ttl=600)
 def fetch_live_trending_api(universe_pool):
@@ -152,7 +158,7 @@ if st.session_state.current_page != "Home":
 # --- Main Dashboard Router ---
 if st.session_state.current_page == "Home":
     st.title("🎛️ Investment Analytics Dashboard")
-    st.caption("Live asset snapshots generated dynamically from open data registries.")
+    st.caption("Live asset snapshots generated dynamically. Gainers are filtered for S&P 500/NASDAQ companies above $50B Market Cap.")
     
     # Generate the dynamic universe check constraints
     universe_pool = get_dynamic_allowed_universe()
@@ -160,7 +166,7 @@ if st.session_state.current_page == "Home":
     tab1, tab2 = st.tabs(["🔥 Top Gainers", "📊 Trending Tickers"])
     
     with tab1:
-        st.subheader("Today's Top Market Gainers")
+        st.subheader("Today's Top Market Gainers (>$50B Market Cap)")
         with st.spinner("Streaming filtered session gainers..."):
             live_gainers = fetch_live_gainers_api(universe_pool)
             st.dataframe(live_gainers, use_container_width=True, hide_index=True)
