@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# 1. Page Layout Setup
+# 1. Page Layout Setup (Must be the first Streamlit command)
 st.set_page_config(page_title="Alpha Tracker Dashboard", layout="wide", initial_sidebar_state="expanded")
 
 # --- Helper Function to Dynamically Execute Sub-Scripts without page_config conflicts ---
@@ -70,10 +70,8 @@ def fetch_live_gainers_api(universe_pool):
             mkt_cap_billions = mkt_cap_raw / 1e9 if mkt_cap_raw else 0
             
             # Strict Filtering Rules: 
-            # 1. Must belong to the index universe (if successfully loaded)
             if universe_pool and symbol not in universe_pool:
                 continue
-            # 2. Market Cap must be >= $50 Billion
             if mkt_cap_billions < 50:
                 continue
                 
@@ -98,42 +96,40 @@ def fetch_live_gainers_api(universe_pool):
 @st.cache_data(ttl=600)
 def fetch_live_trending_api(universe_pool):
     try:
-        url = "https://query2.finance.yahoo.com/v1/finance/trending/US"
+        # Route through 'most_actives' screener endpoint to reliably bypass cloud-IP blocking
+        url = "https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved"
+        params = {"scrIds": "most_actives", "count": 100}
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(url, params=params, headers=headers, timeout=5)
         data = response.json()
-        trends = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
-        
-        # If the index pools loaded, filter symbols. Otherwise, pull top raw trending assets.
-        if universe_pool:
-            valid_symbols = [t["symbol"] for t in trends if t["symbol"] in universe_pool][:10]
-        else:
-            valid_symbols = [t["symbol"] for t in trends][:10]
-            
-        if not valid_symbols:
-            return pd.DataFrame(columns=["Symbol", "Name", "Last Price ($)", "Change (%)", "Market Cap ($B)"])
-            
-        quote_url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={','.join(valid_symbols)}"
-        quote_response = requests.get(quote_url, headers=headers, timeout=5)
-        quote_data = quote_response.json()
-        quotes = quote_data.get("quoteResponse", {}).get("result", [])
+        quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
         
         parsed_results = []
         for q in quotes:
+            symbol = q.get("symbol")
+            
+            # Dynamic Filter check:
+            if universe_pool and symbol not in universe_pool:
+                continue
+                
             parsed_results.append({
-                "Symbol": q.get("symbol"),
+                "Symbol": symbol,
                 "Name": q.get("shortName", "N/A"),
                 "Last Price ($)": round(q.get("regularMarketPrice", 0), 2) if q.get("regularMarketPrice") else "N/A",
                 "Change (%)": f"{q.get('regularMarketChangePercent', 0):+.2f}%" if q.get('regularMarketChangePercent') is not None else "N/A",
-                "Market Cap ($B)": round(q.get("marketCap", 0) / 1e9, 2) if q.get("marketCap") else "N/A"
+                "Market Cap ($B)": round(q.get("marketCap", 0) / 1e9, 2) if q.get("marketCap") else "N/A",
+                "Volume": f"{q.get('regularMarketVolume', 0):,}" if q.get('regularMarketVolume') else "N/A"
             })
+            if len(parsed_results) >= 10:
+                break
+                
         if parsed_results:
             return pd.DataFrame(parsed_results)
     except Exception:
         pass
         
-    return pd.DataFrame({"Notice": ["Live Yahoo data stream temporarily busy. Please refresh the page or open a scanner tool via the sidebar."] * 5})
+    return pd.DataFrame({"Notice": ["High Volume data stream temporarily busy. Please refresh the page or try again shortly."] * 5})
 
 
 # --- Navigation Sidebar ---
@@ -173,7 +169,7 @@ if st.session_state.current_page == "Home":
         
     with tab2:
         st.subheader("High-Volume Trending Tickers")
-        with st.spinner("Streaming filtered trending assets..."):
+        with st.spinner("Streaming high-volume active assets..."):
             live_trending = fetch_live_trending_api(universe_pool)
             st.dataframe(live_trending, use_container_width=True, hide_index=True)
 
