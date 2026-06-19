@@ -9,37 +9,45 @@ st.title("Nifty Smallcap 250 Absolute Return Dashboard")
 st.caption("Dynamically fetches and ranks Nifty Smallcap 250 index stocks by absolute returns.")
 
 # --- 100% Dynamic Institutional Constituent Extraction ---
-@st.cache_data(ttl=86400) # Cache for 24 hours
+@st.cache_data(ttl=86400) # Cache for 24 hours to maximize loading speeds
 def get_smallcap250_tickers_live():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
-    # Primary Stream: Mirror of official NSE India index constituent feeds
-    urls = [
-        "https://raw.githubusercontent.com/skbavishi/mftracker/main/data/ind_niftysmallcap250list.csv",
-        "https://raw.githubusercontent.com/pankaj-sharma/nse-indices-constituents/main/constituents/ind_niftysmallcap250list.csv"
-    ]
+    # Using an open mirror data lake that clones official NSE index structures and uses a reliable global CDN
+    url = "https://raw.githubusercontent.com/pkjmesra/PKNSETools/main/PKNSETools/data/ind_niftysmallcap250list.csv"
     
-    for url in urls:
-        try:
-            response = requests.get(url, headers=headers, timeout=7)
-            if response.status_code == 200:
-                df = pd.read_csv(StringIO(response.text))
-                # Standard NSE index files use 'Symbol' or 'ticker' as the column key
-                symbol_col = None
-                for col in df.columns:
-                    if col.lower() in ['symbol', 'ticker', 'stock symbol']:
-                        symbol_col = col
-                        break
-                
-                if symbol_col:
-                    tickers = [str(sym).strip() + ".NS" for sym in df[symbol_col].dropna() if not str(sym).endswith('.NS')]
-                    if len(tickers) > 50: # Guarantee it grabbed a full index dataset
-                        return tickers
-        except Exception:
-            continue
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            df = pd.read_csv(StringIO(response.text))
             
+            # Map column variations for the index (Symbol / Ticker)
+            symbol_col = None
+            for col in df.columns:
+                if col.lower() in ['symbol', 'ticker', 'stock symbol']:
+                    symbol_col = col
+                    break
+            
+            if symbol_col:
+                tickers = [str(sym).strip() + ".NS" for sym in df[symbol_col].dropna()]
+                if len(tickers) > 100:
+                    return tickers
+    except Exception:
+        pass
+        
+    # Secondary Cloud-Resilient Strategy: Pulling from another active mirror infrastructure file
+    try:
+        backup_url = "https://raw.githubusercontent.com/skbavishi/mftracker/main/data/ind_niftysmallcap250list.csv"
+        response = requests.get(backup_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            df = pd.read_csv(StringIO(response.text))
+            if 'Symbol' in df.columns:
+                return [str(sym).strip() + ".NS" for sym in df['Symbol'].dropna()]
+    except Exception:
+        pass
+        
     return None
 
 def safe_download(ticker, start_date, end_date):
@@ -58,7 +66,7 @@ def build_table(tickers, start_date, end_date):
     rows = []
     failed = []
     
-    # Progress visualization container
+    # Set up container execution bars
     progress_bar = st.progress(0.0)
     
     for i, t in enumerate(tickers):
@@ -96,14 +104,14 @@ def build_table(tickers, start_date, end_date):
 start_date = st.date_input("Start date", datetime(2024, 9, 30))
 end_date = st.date_input("End date", datetime.today())
 
-# Dynamic extraction trigger
+# Fire live dynamic array generation
 tickers_pool = get_smallcap250_tickers_live()
 
 if st.button("Build ranking"):
     if tickers_pool is None or len(tickers_pool) == 0:
-        st.error("Data registries are experiencing connection limits from this Cloud instance. Please refresh or try again in a moment.")
+        st.error("The mirror registries are currently throttled by your cloud node instance network routing. Please try clicking the button again shortly.")
     else:
-        with st.spinner(f"Downloading histories for {len(tickers_pool)} Smallcap 250 assets via Yahoo Finance..."):
+        with st.spinner(f"Downloading history for {len(tickers_pool)} dynamically mapped Smallcap assets..."):
             rank_df, failed = build_table(tickers_pool, start_date, end_date)
 
         if rank_df.empty:
