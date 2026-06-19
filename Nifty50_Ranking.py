@@ -3,7 +3,6 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 
-st.set_page_config(page_title="Nifty 50 Return Dashboard", layout="wide")
 st.title("Nifty 50 Absolute Return Dashboard")
 st.caption("Ranks Nifty 50 stocks by absolute return from Sep 2024 to today.")
 
@@ -89,26 +88,6 @@ if st.button("Build ranking"):
             file_name="nifty50_absolute_returns.csv",
             mime="text/csv"
         )
-
-        st.subheader("Top 15 performers")
-        top15 = rank_df.head(15).copy()
-        top15["Absolute_Return_%"] = top15["Absolute_Return_%"].round(2)
-        st.bar_chart(top15.set_index("Ticker")["Absolute_Return_%"])
-
-        st.subheader("Stock detail")
-        selected = st.selectbox("Select a stock", rank_df["Ticker"].tolist())
-        detail = safe_download(selected, start_date, end_date)
-
-        if detail is None or detail.empty:
-            st.error(f"No data for {selected}")
-        else:
-            price = detail["price"].squeeze()
-            if len(price) >= 2:
-                current_return = ((float(price.iloc[-1]) / float(price.iloc[0])) - 1.0) * 100.0
-                st.metric("Absolute Return %", f"{current_return:.2f}%")
-                st.line_chart(price)
-            else:
-                st.warning("Not enough data for chart.")
 
         if failed:
             st.warning("Failed tickers: " + ", ".join(failed))
