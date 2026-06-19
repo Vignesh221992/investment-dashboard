@@ -149,6 +149,9 @@ if st.session_state.current_page != "Home":
     st.sidebar.markdown("---")
     if st.sidebar.button("🏠 Back to Home Landing Page", use_container_width=True):
         st.session_state.current_page = "Home"
+ 
+if st.sidebar.button("📈 Nifty Smallcap 250 Ranking", use_container_width=True):
+    st.session_state.current_page = "Smallcap250"
 
 
 # --- Main Dashboard Router ---
@@ -178,3 +181,6 @@ elif st.session_state.current_page == "ATH":
 
 elif st.session_state.current_page == "Nifty":
     run_script("Nifty50_Ranking.py")
+ 
+elif st.session_state.current_page == "Smallcap250":
+    run_script("NiftySmallcap250_Ranking.py")
