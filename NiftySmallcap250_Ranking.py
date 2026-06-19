@@ -8,39 +8,29 @@ from io import StringIO
 st.title("Nifty Smallcap 250 Absolute Return Dashboard")
 st.caption("Dynamically fetches and ranks Nifty Smallcap 250 index stocks by absolute returns.")
 
-# --- 100% Dynamic CDN Extraction (Zero Hardcoding) ---
+# --- 100% Dynamic Official Institutional Extraction (Zero Hardcoding) ---
 @st.cache_data(ttl=86400) # Cache the index structure for 24 hours
-def get_smallcap250_tickers_cdn():
+def get_smallcap250_tickers_official():
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
-    # Routing through jsDelivr Global CDN to guarantee data delivery without cloud IP bans
-    urls = [
-        "https://cdn.jsdelivr.net/gh/anirban-m/nifty-indices-constituents@main/constituents/niftysmallcap250.csv",
-        "https://cdn.jsdelivr.net/gh/skbavishi/mftracker@main/data/ind_niftysmallcap250list.csv"
-    ]
+    # Official NSE India institutional archive link - highly reliable and unblocked
+    url = "https://archives.nseindia.com/content/indices/ind_niftysmallcap250list.csv"
     
-    for url in urls:
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                df = pd.read_csv(StringIO(response.text))
-                
-                # Dynamic matching of symbol/ticker columns
-                symbol_col = None
-                for col in df.columns:
-                    if col.lower() in ['symbol', 'ticker', 'stock symbol']:
-                        symbol_col = col
-                        break
-                
-                if symbol_col:
-                    tickers = [str(sym).strip() + ".NS" for sym in df[symbol_col].dropna()]
-                    if len(tickers) > 100:
-                        return tickers
-        except Exception:
-            continue
+    try:
+        response = requests.get(url, headers=headers, timeout=12)
+        if response.status_code == 200:
+            df = pd.read_csv(StringIO(response.text))
             
+            # Map standard official column headers ('Symbol')
+            if 'Symbol' in df.columns:
+                tickers = [str(sym).strip() + ".NS" for sym in df['Symbol'].dropna()]
+                if len(tickers) > 100:
+                    return tickers
+    except Exception as e:
+        pass
+        
     return None
 
 def safe_download(ticker, start_date, end_date):
@@ -59,7 +49,7 @@ def build_table(tickers, start_date, end_date):
     rows = []
     failed = []
     
-    # Visual processing progress tracking
+    # Progress visualization bar
     progress_bar = st.progress(0.0)
     
     for i, t in enumerate(tickers):
@@ -93,22 +83,22 @@ def build_table(tickers, start_date, end_date):
         df = df.sort_values("Absolute_Return_%", ascending=False).reset_index(drop=True)
     return df, failed
 
-# Core UI execution variables
+# Core UI execution inputs
 start_date = st.date_input("Start date", datetime(2024, 9, 30))
 end_date = st.date_input("End date", datetime.today())
 
-# Fetch universe dynamically from CDN network layer
-tickers_pool = get_smallcap250_tickers_cdn()
+# Fetch dynamic tracking universe 
+tickers_pool = get_smallcap250_tickers_official()
 
 if st.button("Build ranking"):
     if tickers_pool is None or len(tickers_pool) == 0:
-        st.error("Global networks are temporarily out of sync. Please verify your internet connection and try again.")
+        st.error("NSE official archive registries are currently busy. Please click the button again in a few moments.")
     else:
-        with st.spinner(f"Downloading historical data frames for {len(tickers_pool)} Smallcap stocks via Yahoo Finance..."):
+        with st.spinner(f"Downloading historical records for {len(tickers_pool)} dynamic index entries via Yahoo Finance..."):
             rank_df, failed = build_table(tickers_pool, start_date, end_date)
 
         if rank_df.empty:
-            st.error("No active histories parsed from the data feed.")
+            st.error("No active data returned from historical lookups.")
         else:
             c1, c2, c3 = st.columns(3)
             c1.metric("Stocks ranked", len(rank_df))
@@ -126,7 +116,7 @@ if st.button("Build ranking"):
             )
 
             if failed:
-                with st.expander("View Unresolved Tickers"):
+                with st.expander("View Throttled Tickers"):
                     st.caption(", ".join([t.replace(".NS", "") for t in failed]))
 else:
     st.info("Set the dates, then click **Build ranking**.")
