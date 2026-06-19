@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# 1. Page Layout Setup (Must be the first Streamlit command)
+# 1. Page Layout Setup
 st.set_page_config(page_title="Alpha Tracker Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-# --- Helper Function to Dynamically Execute Sub-Scripts without page_config conflicts ---
+# --- Helper Function to Dynamically Execute Sub-Scripts ---
 def run_script(script_path):
     try:
         with open(script_path, "r", encoding="utf-8") as f:
@@ -51,7 +51,7 @@ def get_dynamic_allowed_universe():
     return allowed_tickers
 
 
-# --- API Streams: Fetching completely dynamic screener snapshots via Yahoo Finance ---
+# --- API Streams: Fetching completely dynamic screener snapshots with Sector Details via Yahoo Finance ---
 @st.cache_data(ttl=600)
 def fetch_live_gainers_api(universe_pool):
     try:
@@ -63,29 +63,43 @@ def fetch_live_gainers_api(universe_pool):
         data = response.json()
         quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
         
-        parsed_results = []
+        # Filter down candidates first before making a secondary clean quote request
+        valid_symbols = []
         for q in quotes:
             symbol = q.get("symbol")
             mkt_cap_raw = q.get("marketCap", 0)
             mkt_cap_billions = mkt_cap_raw / 1e9 if mkt_cap_raw else 0
             
-            # Strict Filtering Rules: 
             if universe_pool and symbol not in universe_pool:
                 continue
             if mkt_cap_billions < 50:
                 continue
+            valid_symbols.append(symbol)
+            if len(valid_symbols) >= 10:
+                break
                 
+        if not valid_symbols:
+            return pd.DataFrame(columns=["Symbol", "Name", "Sector", "Price ($)", "Change ($)", "Change (%)", "Market Cap ($B)"])
+            
+        # Bulk query endpoint to extract real-time descriptive Sector tags
+        quote_url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={','.join(valid_symbols)}"
+        quote_response = requests.get(quote_url, headers=headers, timeout=5)
+        quote_data = quote_response.json()
+        detailed_quotes = quote_data.get("quoteResponse", {}).get("result", [])
+        
+        parsed_results = []
+        for q in detailed_quotes:
+            mkt_cap_billions = (q.get("marketCap", 0) / 1e9) if q.get("marketCap") else 0
             parsed_results.append({
-                "Symbol": symbol,
+                "Symbol": q.get("symbol"),
                 "Name": q.get("shortName", "N/A"),
+                "Sector": q.get("sector", "N/A"),
                 "Price ($)": round(q.get("regularMarketPrice", 0), 2) if q.get("regularMarketPrice") else "N/A",
                 "Change ($)": round(q.get("regularMarketChange", 0), 2) if q.get("regularMarketChange") else "N/A",
                 "Change (%)": f"{q.get('regularMarketChangePercent', 0):+.2f}%" if q.get('regularMarketChangePercent') is not None else "N/A",
                 "Market Cap ($B)": round(mkt_cap_billions, 2)
             })
-            if len(parsed_results) >= 10:
-                break
-                
+            
         if parsed_results:
             return pd.DataFrame(parsed_results)
     except Exception:
@@ -96,7 +110,6 @@ def fetch_live_gainers_api(universe_pool):
 @st.cache_data(ttl=600)
 def fetch_live_trending_api(universe_pool):
     try:
-        # Route through 'most_actives' screener endpoint to reliably bypass cloud-IP blocking
         url = "https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved"
         params = {"scrIds": "most_actives", "count": 100}
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -105,25 +118,36 @@ def fetch_live_trending_api(universe_pool):
         data = response.json()
         quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
         
-        parsed_results = []
+        valid_symbols = []
         for q in quotes:
             symbol = q.get("symbol")
-            
-            # Dynamic Filter check:
             if universe_pool and symbol not in universe_pool:
                 continue
+            valid_symbols.append(symbol)
+            if len(valid_symbols) >= 10:
+                break
                 
+        if not valid_symbols:
+            return pd.DataFrame(columns=["Symbol", "Name", "Sector", "Last Price ($)", "Change (%)", "Market Cap ($B)", "Volume"])
+            
+        # Fetching data package with metadata sector tags in bulk
+        quote_url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={','.join(valid_symbols)}"
+        quote_response = requests.get(quote_url, headers=headers, timeout=5)
+        quote_data = quote_response.json()
+        detailed_quotes = quote_data.get("quoteResponse", {}).get("result", [])
+        
+        parsed_results = []
+        for q in detailed_quotes:
             parsed_results.append({
-                "Symbol": symbol,
+                "Symbol": q.get("symbol"),
                 "Name": q.get("shortName", "N/A"),
+                "Sector": q.get("sector", "N/A"),
                 "Last Price ($)": round(q.get("regularMarketPrice", 0), 2) if q.get("regularMarketPrice") else "N/A",
                 "Change (%)": f"{q.get('regularMarketChangePercent', 0):+.2f}%" if q.get('regularMarketChangePercent') is not None else "N/A",
                 "Market Cap ($B)": round(q.get("marketCap", 0) / 1e9, 2) if q.get("marketCap") else "N/A",
                 "Volume": f"{q.get('regularMarketVolume', 0):,}" if q.get('regularMarketVolume') else "N/A"
             })
-            if len(parsed_results) >= 10:
-                break
-                
+            
         if parsed_results:
             return pd.DataFrame(parsed_results)
     except Exception:
@@ -145,18 +169,17 @@ if st.sidebar.button("🚀 Mega-Cap ATH Scanner", use_container_width=True):
 if st.sidebar.button("📈 Nifty 50 Return Ranking", use_container_width=True):
     st.session_state.current_page = "Nifty"
 
+if st.sidebar.button("📈 Nifty Smallcap 250 Ranking", use_container_width=True):
+    st.session_state.current_page = "Smallcap250"
+
 if st.session_state.current_page != "Home":
     st.sidebar.markdown("---")
     if st.sidebar.button("🏠 Back to Home Landing Page", use_container_width=True):
         st.session_state.current_page = "Home"
- 
-if st.sidebar.button("📈 Nifty Smallcap 250 Ranking", use_container_width=True):
-    st.session_state.current_page = "Smallcap250"
 
 
 # --- Main Dashboard Router ---
 if st.session_state.current_page == "Home":
-    st.title("🎛️ Investment Analytics Dashboard")
     st.caption("Live asset snapshots generated dynamically. Gainers are filtered for S&P 500/NASDAQ companies above $50B Market Cap.")
     
     # Generate the dynamic universe check constraints
@@ -166,13 +189,13 @@ if st.session_state.current_page == "Home":
     
     with tab1:
         st.subheader("Today's Top Market Gainers (>$50B Market Cap)")
-        with st.spinner("Streaming filtered session gainers..."):
+        with st.spinner("Streaming filtered session gainers with sector keys..."):
             live_gainers = fetch_live_gainers_api(universe_pool)
             st.dataframe(live_gainers, use_container_width=True, hide_index=True)
         
     with tab2:
         st.subheader("High-Volume Trending Tickers")
-        with st.spinner("Streaming high-volume active assets..."):
+        with st.spinner("Streaming high-volume active assets with sector keys..."):
             live_trending = fetch_live_trending_api(universe_pool)
             st.dataframe(live_trending, use_container_width=True, hide_index=True)
 
@@ -181,6 +204,6 @@ elif st.session_state.current_page == "ATH":
 
 elif st.session_state.current_page == "Nifty":
     run_script("Nifty50_Ranking.py")
- 
+
 elif st.session_state.current_page == "Smallcap250":
     run_script("NiftySmallcap250_Ranking.py")
