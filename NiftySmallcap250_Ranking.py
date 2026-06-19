@@ -1,26 +1,46 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import requests
 from datetime import datetime
+from io import StringIO
 
 st.title("Nifty Smallcap 250 Absolute Return Dashboard")
 st.caption("Dynamically fetches and ranks Nifty Smallcap 250 index stocks by absolute returns.")
 
-# --- 100% Dynamic Constituent Extraction ---
-@st.cache_data(ttl=86400)
-def get_smallcap250_tickers():
-    try:
-        # Pulls directly from an unblocked raw text file containing the updated index tickers
-        url = "https://raw.githubusercontent.com/mohit-potdar/nifty-indices-constituents/main/constituents/niftysmallcap250.csv"
-        df = pd.read_csv(url)
-        
-        # Identify the symbol column and add the necessary Yahoo Finance .NS suffix
-        symbol_col = [col for col in df.columns if 'symbol' in col.lower() or 'ticker' in col.lower()][0]
-        tickers = [str(sym).strip() + ".NS" for sym in df[symbol_col].dropna() if not str(sym).endswith('.NS')]
-        return tickers
-    except Exception as e:
-        # Returning None forces the UI to show an error rather than running a hardcoded list
-        return None
+# --- 100% Dynamic Institutional Constituent Extraction ---
+@st.cache_data(ttl=86400) # Cache for 24 hours
+def get_smallcap250_tickers_live():
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    # Primary Stream: Mirror of official NSE India index constituent feeds
+    urls = [
+        "https://raw.githubusercontent.com/skbavishi/mftracker/main/data/ind_niftysmallcap250list.csv",
+        "https://raw.githubusercontent.com/pankaj-sharma/nse-indices-constituents/main/constituents/ind_niftysmallcap250list.csv"
+    ]
+    
+    for url in urls:
+        try:
+            response = requests.get(url, headers=headers, timeout=7)
+            if response.status_code == 200:
+                df = pd.read_csv(StringIO(response.text))
+                # Standard NSE index files use 'Symbol' or 'ticker' as the column key
+                symbol_col = None
+                for col in df.columns:
+                    if col.lower() in ['symbol', 'ticker', 'stock symbol']:
+                        symbol_col = col
+                        break
+                
+                if symbol_col:
+                    tickers = [str(sym).strip() + ".NS" for sym in df[symbol_col].dropna() if not str(sym).endswith('.NS')]
+                    if len(tickers) > 50: # Guarantee it grabbed a full index dataset
+                        return tickers
+        except Exception:
+            continue
+            
+    return None
 
 def safe_download(ticker, start_date, end_date):
     try:
@@ -38,8 +58,9 @@ def build_table(tickers, start_date, end_date):
     rows = []
     failed = []
     
-    # Progress tracking for the 250 stocks
+    # Progress visualization container
     progress_bar = st.progress(0.0)
+    
     for i, t in enumerate(tickers):
         progress_bar.progress((i + 1) / len(tickers))
         data = safe_download(t, start_date, end_date)
@@ -71,21 +92,22 @@ def build_table(tickers, start_date, end_date):
         df = df.sort_values("Absolute_Return_%", ascending=False).reset_index(drop=True)
     return df, failed
 
-# Execution inputs
+# Execution UI elements
 start_date = st.date_input("Start date", datetime(2024, 9, 30))
 end_date = st.date_input("End date", datetime.today())
 
-tickers_pool = get_smallcap250_tickers()
+# Dynamic extraction trigger
+tickers_pool = get_smallcap250_tickers_live()
 
 if st.button("Build ranking"):
     if tickers_pool is None or len(tickers_pool) == 0:
-        st.error("Could not fetch the Nifty Smallcap 250 index list dynamically. Please try again in a few moments.")
+        st.error("Data registries are experiencing connection limits from this Cloud instance. Please refresh or try again in a moment.")
     else:
-        with st.spinner(f"Downloading data for {len(tickers_pool)} Smallcap stocks via Yahoo Finance..."):
+        with st.spinner(f"Downloading histories for {len(tickers_pool)} Smallcap 250 assets via Yahoo Finance..."):
             rank_df, failed = build_table(tickers_pool, start_date, end_date)
 
         if rank_df.empty:
-            st.error("No data returned from Yahoo Finance.")
+            st.error("No active data frames returned from Yahoo Finance.")
         else:
             c1, c2, c3 = st.columns(3)
             c1.metric("Stocks ranked", len(rank_df))
@@ -103,7 +125,7 @@ if st.button("Build ranking"):
             )
 
             if failed:
-                with st.expander("View Unresolved/Throttled Tickers"):
+                with st.expander("View Unresolved/Throttled Assets"):
                     st.caption(", ".join([t.replace(".NS", "") for t in failed]))
 else:
     st.info("Set the dates, then click **Build ranking**.")
