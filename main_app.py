@@ -1,68 +1,74 @@
 import streamlit as st
-import importlib.util
-import sys
 import pandas as pd
 import requests
 
-# Page Layout Setup
+# 1. Page Layout Setup
 st.set_page_config(page_title="Alpha Tracker Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-# --- Helper Function to Dynamically Run Sub-Scripts ---
+# --- Helper Function to Dynamically Execute Sub-Scripts without page_config conflicts ---
 def run_script(script_path):
-    spec = importlib.util.spec_from_file_location("sub_script", script_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["sub_script"] = module
-    spec.loader.exec_module(module)
+    try:
+        with open(script_path, "r", encoding="utf-8") as f:
+            code = f.read()
+        
+        # Strip out any secondary set_page_config commands to prevent Streamlit from crashing
+        clean_lines = []
+        for line in code.splitlines():
+            if "st.set_page_config" not in line:
+                clean_lines.append(line)
+        clean_code = "\n".join(clean_lines)
+        
+        # Execute script code cleanly in the shared environment namespace
+        exec(clean_code, globals())
+    except Exception as e:
+        st.error(f"Failed to load module script dynamically: {e}")
 
-# --- Cloud Safe Universe Check: Hardcoded Pool to Avoid Cloud-IP Wikipedia Blocks ---
-@st.cache_data(ttl=86400)
-def get_allowed_universe():
-    # Bundled core S&P 500 and Nasdaq high-liquidity stocks to guarantee filtering matches on cloud servers
-    core_universe = [
-        "AAPL", "MSFT", "AMZN", "NVDA", "META", "GOOGL", "GOOG", "TSLA", "AVGO", "COST", 
-        "NFLX", "ADBE", "AMD", "PEP", "LIN", "ORCL", "CSCO", "INTC", "TMUS", "QCOM", 
-        "TXN", "AMGN", "HON", "ISRG", "AMAT", "BKNG", "VRTX", "SBUX", "PANW", "MDLZ",
-        "REGN", "LRCX", "ADI", "MU", "KLAC", "SNPS", "CDNS", "MELI", "CRWD", "MAR",
-        "CTAS", "PH", "NXPI", "WDAY", "CEG", "ADSK", "PCAR", "MCHP", "CPRT", "MNST",
-        "KDP", "ROST", "PAYX", "FAST", "AEP", "ODFL", "GE", "LMT", "WM", "NOC",
-        "NOW", "UBER", "CRM", "UNH", "JNJ", "XOM", "V", "PG", "MA", "HD", "CVX", 
-        "MRK", "ABBV", "COST", "PEP", "KO", "BAC", "WMT", "MCD", "TMO", "CSCO", 
-        "ACN", "ABT", "LIN", "DIS", "VZ", "ORCL", "CMCSA", "WFC", "PM", "INTC", 
-        "LLY", "SCHW", "IBM", "AXP", "GS", "BA", "CAT", "GE", "HON", "TXN",
-        "BEL", "SPY", "QQQ", "IWM"
-    ]
-    return set(core_universe)
+# --- 100% Dynamic Universe Generator: Fetching lists live from data-center friendly endpoints ---
+@st.cache_data(ttl=86400) # Cache for 24 hours to maximize performance
+def get_dynamic_allowed_universe():
+    allowed_tickers = set()
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
+    # 1. Fetch S&P 500 components dynamically from an open data repository
+    try:
+        sp_url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
+        sp_df = pd.read_csv(sp_url)
+        if "Symbol" in sp_df.columns:
+            allowed_tickers.update(sp_df["Symbol"].str.replace('.', '-').tolist())
+    except Exception:
+        pass
+        
+    # 2. Fetch NASDAQ components dynamically from an open financial dataset stream
+    try:
+        nasdaq_url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/nasdaq/nasdaq_tickers.txt"
+        res = requests.get(nasdaq_url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            nas_tickers = [line.strip().upper() for line in res.text.splitlines() if line.strip()]
+            allowed_tickers.update(nas_tickers)
+    except Exception:
+        pass
+        
+    return allowed_tickers
 
 
-# --- API Streams: Fetch Live Data Directly via Yahoo's JSON Servers ---
+# --- API Streams: Fetching completely dynamic screener snapshots via Yahoo Finance ---
 @st.cache_data(ttl=600)
 def fetch_live_gainers_api(universe_pool):
     try:
         url = "https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved"
-        params = {"scrIds": "day_gainers", "count": 150} # Heavy query pool to ensure overlap with cloud validation lists
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        }
+        params = {"scrIds": "day_gainers", "count": 150} 
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         
-        response = requests.get(url, params=params, headers=headers, timeout=7)
+        response = requests.get(url, params=params, headers=headers, timeout=5)
         data = response.json()
-        
         quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
-        if not quotes:
-            # Fallback mock structured data if Yahoo completely shuts out the Streamlit container IP
-            return pd.DataFrame({
-                "Symbol": ["NOW", "META", "AMZN", "UBER", "ADBE"],
-                "Name": ["ServiceNow Inc.", "Meta Platforms", "Amazon.com Inc.", "Uber Technologies", "Adobe Inc."],
-                "Price ($)": [945.20, 505.40, 185.10, 72.45, 490.30],
-                "Change (%)": ["+4.25%", "+3.80%", "+2.95%", "+2.40%", "+2.15%"],
-                "Market Cap ($B)": [189.5, 1280.4, 1920.1, 151.3, 219.8],
-                "Note": ["Cloud Fallback Data"] * 5
-            })
-            
+        
         parsed_results = []
         for q in quotes:
             symbol = q.get("symbol")
-            if symbol not in universe_pool:
+            
+            # Apply index filter only if the live reference lists loaded successfully
+            if universe_pool and symbol not in universe_pool:
                 continue
                 
             parsed_results.append({
@@ -71,47 +77,41 @@ def fetch_live_gainers_api(universe_pool):
                 "Price ($)": round(q.get("regularMarketPrice", 0), 2) if q.get("regularMarketPrice") else "N/A",
                 "Change ($)": round(q.get("regularMarketChange", 0), 2) if q.get("regularMarketChange") else "N/A",
                 "Change (%)": f"{q.get('regularMarketChangePercent', 0):+.2f}%" if q.get('regularMarketChangePercent') is not None else "N/A",
-                "Market Cap ($B)": round(q.get("marketCap", 0) / 1e9, 2) if q.get("marketCap") else "N/A",
-                "Volume": f"{q.get('regularMarketVolume', 0):,}" if q.get('regularMarketVolume') else "N/A"
+                "Market Cap ($B)": round(q.get("marketCap", 0) / 1e9, 2) if q.get("marketCap") else "N/A"
             })
             if len(parsed_results) >= 10:
                 break
                 
-        return pd.DataFrame(parsed_results) if parsed_results else pd.DataFrame({"Notification": ["No matching S&P/Nasdaq gainers inside active session window."]})
-    except Exception as e:
-        return pd.DataFrame({"Error Status": [f"Yahoo Finance rejected server handshakes: {e}"]})
+        if parsed_results:
+            return pd.DataFrame(parsed_results)
+    except Exception:
+        pass
+        
+    return pd.DataFrame({"Notice": ["Live Yahoo data stream temporarily busy. Please refresh the page or open a scanner tool via the sidebar."] * 5})
 
 @st.cache_data(ttl=600)
 def fetch_live_trending_api(universe_pool):
     try:
         url = "https://query2.finance.yahoo.com/v1/finance/trending/US"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         
-        response = requests.get(url, headers=headers, timeout=7)
+        response = requests.get(url, headers=headers, timeout=5)
         data = response.json()
         trends = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
         
-        # Pre-filter trending stream using index boundaries
-        valid_symbols = [t["symbol"] for t in trends if t["symbol"] in universe_pool][:10]
-        
+        # If the index pools loaded, filter symbols. Otherwise, pull top raw trending assets.
+        if universe_pool:
+            valid_symbols = [t["symbol"] for t in trends if t["symbol"] in universe_pool][:10]
+        else:
+            valid_symbols = [t["symbol"] for t in trends][:10]
+            
         if not valid_symbols:
-            # Clean backup list if primary streaming matrix comes back empty
-            valid_symbols = ["AAPL", "NVDA", "MSFT", "TSLA", "GOOGL", "META", "AMZN", "NFLX"]
+            return pd.DataFrame(columns=["Symbol", "Name", "Last Price ($)", "Change (%)", "Market Cap ($B)"])
             
         quote_url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={','.join(valid_symbols)}"
-        quote_response = requests.get(quote_url, headers=headers, timeout=7)
+        quote_response = requests.get(quote_url, headers=headers, timeout=5)
         quote_data = quote_response.json()
-        
-        if "quoteResponse" not in quote_data or not quote_data["quoteResponse"].get("result"):
-            # Clean fallback visualization instead of an empty layout or an uncaught error string 
-            return pd.DataFrame({
-                "Symbol": valid_symbols,
-                "Tracking Status": ["Active Asset (Yahoo detailed metadata endpoints are currently rate-limiting Cloud IP)"] * len(valid_symbols)
-            })
-            
-        quotes = quote_data["quoteResponse"].get("result", [])
+        quotes = quote_data.get("quoteResponse", {}).get("result", [])
         
         parsed_results = []
         for q in quotes:
@@ -122,9 +122,12 @@ def fetch_live_trending_api(universe_pool):
                 "Change (%)": f"{q.get('regularMarketChangePercent', 0):+.2f}%" if q.get('regularMarketChangePercent') is not None else "N/A",
                 "Market Cap ($B)": round(q.get("marketCap", 0) / 1e9, 2) if q.get("marketCap") else "N/A"
             })
-        return pd.DataFrame(parsed_results)
-    except Exception as e:
-        return pd.DataFrame({"Status": [f"Trending view data stream restricted on deployment platform: {e}"]})
+        if parsed_results:
+            return pd.DataFrame(parsed_results)
+    except Exception:
+        pass
+        
+    return pd.DataFrame({"Notice": ["Live Yahoo data stream temporarily busy. Please refresh the page or open a scanner tool via the sidebar."] * 5})
 
 
 # --- Navigation Sidebar ---
@@ -149,10 +152,10 @@ if st.session_state.current_page != "Home":
 # --- Main Dashboard Router ---
 if st.session_state.current_page == "Home":
     st.title("🎛️ Investment Analytics Dashboard")
-    st.caption("Live snapshot filtered strictly for top S&P 500 and NASDAQ constituents.")
+    st.caption("Live asset snapshots generated dynamically from open data registries.")
     
-    # Initialize the tracking pool
-    universe_pool = get_allowed_universe()
+    # Generate the dynamic universe check constraints
+    universe_pool = get_dynamic_allowed_universe()
     
     tab1, tab2 = st.tabs(["🔥 Top Gainers", "📊 Trending Tickers"])
     
