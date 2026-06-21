@@ -6,7 +6,7 @@ import requests
 import yfinance as yf
 
 # 1. Page Layout Setup
-st.set_page_config(page_title="Alpha Tracker Dashboard", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Tracker Dashboard", layout="wide", initial_sidebar_state="expanded")
 
 # --- Helper Function to Dynamically Execute Sub-Scripts ---
 def run_script(script_path):
@@ -97,6 +97,52 @@ def resolve_sector(symbol):
         return sector
     except Exception:
         return "Technology" # Smart default fallback for tech/enterprise screens
+
+@st.cache_data(ttl=300)
+def fetch_market_overview():
+    """Fetch lightweight price snapshots for major market indicators."""
+    symbols = {
+        "S&P 500": "^GSPC",
+        "NIFTY 50": "^NSEI",
+        "Gold": "GC=F",
+        "Silver": "SI=F",
+        "Bitcoin": "BTC-USD"
+    }
+
+    rows = []
+    for label, ticker_symbol in symbols.items():
+        try:
+            ticker = yf.Ticker(ticker_symbol)
+            info = ticker.info or {}
+            hist = ticker.history(period="15d", interval="1d", auto_adjust=False)
+
+            if hist is not None and not hist.empty and len(hist) >= 2:
+                close_series = hist["Close"].dropna()
+                current_price = info.get("regularMarketPrice") or info.get("currentPrice") or float(close_series.iloc[-1])
+                prev_price = float(close_series.iloc[-2]) if len(close_series) >= 2 else float(current_price)
+                daily_history = close_series.tail(10)
+                chart_values = daily_history.pct_change().fillna(0).mul(100)
+            else:
+                current_price = info.get("regularMarketPrice") or info.get("currentPrice")
+                prev_price = current_price
+                daily_history = pd.Series([float(current_price)]).dropna()
+                chart_values = pd.Series([0.0], index=daily_history.index)
+
+            if current_price is None or prev_price is None or prev_price <= 0:
+                continue
+
+            change_pct = ((float(current_price) - float(prev_price)) / float(prev_price)) * 100
+            rows.append({
+                "Label": label,
+                "Symbol": ticker_symbol,
+                "Price": float(current_price),
+                "Change (%)": float(change_pct),
+                "History": chart_values
+            })
+        except Exception:
+            continue
+
+    return pd.DataFrame(rows)
 
 # --- 100% Dynamic Universe Generator ---
 @st.cache_data(ttl=86400) 
@@ -290,6 +336,38 @@ if st.session_state.current_page != "Home":
 
 # --- Main Dashboard Router ---
 if st.session_state.current_page == "Home":
+    market_overview = fetch_market_overview()
+    if not market_overview.empty:
+        st.subheader("Market Snapshot", divider="rainbow")
+        cols = st.columns(len(market_overview))
+        for col, row in zip(cols, market_overview.to_dict("records")):
+            with col:
+                with st.container(border=True):
+                    st.caption(row["Label"])
+                    st.markdown(
+                        f"<div style='font-size:1.35rem; font-weight:600;'>{row['Price']:,.2f}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    delta_color = "#22c55e" if row["Change (%)"] >= 0 else "#ef4444"
+                    st.markdown(
+                        f"<div style='font-size:0.9rem; color:{delta_color};'>{row['Change (%)']:+.2f}%</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    history = row.get("History")
+                    chart_data = pd.Series(history).dropna().astype(float) if history is not None else pd.Series(dtype=float)
+                    chart_data = chart_data[chart_data.notna()]
+                    if len(chart_data) >= 2:
+                        chart_frame = chart_data.rename("Daily Move (%)").to_frame()
+                        chart_frame.index.name = "Date"
+                        st.line_chart(
+                            chart_frame,
+                            height=90,
+                            width="stretch",
+                        )
+                    else:
+                        st.caption("No recent chart")
+
     selected_countries = st.multiselect(
         "Select countries",
         options=list(COUNTRY_REGION_MAP.keys()),
