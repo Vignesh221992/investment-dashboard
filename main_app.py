@@ -1,3 +1,5 @@
+from io import StringIO
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -33,6 +35,54 @@ MEGA_CAP_SECTORS = {
     "MA": "Financial Services", "PG": "Consumer Defensive", "COST": "Consumer Defensive",
     "JNJ": "Healthcare", "HD": "Consumer Cyclical", "ORCL": "Technology", "NFLX": "Communication Services",
     "MRK": "Healthcare", "CVX": "Energy", "AMD": "Technology", "CRM": "Technology", "NOW": "Technology"
+}
+
+COUNTRY_REGION_MAP = {
+    "United States": "US",
+    "India": "IN",
+    "Canada": "CA",
+    "United Kingdom": "GB",
+    "Germany": "DE",
+    "France": "FR",
+    "Australia": "AU",
+    "Japan": "JP"
+}
+
+COUNTRY_INDEX_SOURCES = {
+    "United States": {
+        "type": "csv",
+        "url": "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv",
+        "symbol_col": "Symbol"
+    },
+    "India": {
+        "type": "csv",
+        "url": "https://archives.nseindia.com/content/indices/ind_nifty50list.csv",
+        "symbol_col": "Symbol"
+    },
+    "Canada": {
+        "type": "wiki",
+        "url": "https://en.wikipedia.org/wiki/S%26P/TSX_60"
+    },
+    "United Kingdom": {
+        "type": "wiki",
+        "url": "https://en.wikipedia.org/wiki/FTSE_100_Index"
+    },
+    "Germany": {
+        "type": "wiki",
+        "url": "https://en.wikipedia.org/wiki/DAX"
+    },
+    "France": {
+        "type": "wiki",
+        "url": "https://en.wikipedia.org/wiki/CAC_40"
+    },
+    "Australia": {
+        "type": "wiki",
+        "url": "https://en.wikipedia.org/wiki/S%26P/ASX_200"
+    },
+    "Japan": {
+        "type": "wiki",
+        "url": "https://en.wikipedia.org/wiki/Nikkei_225"
+    }
 }
 
 @st.cache_data(ttl=86400)
@@ -76,87 +126,148 @@ def get_dynamic_allowed_universe():
     return allowed_tickers
 
 
-# --- API Streams: Fetching snapshots securely from Yahoo Finance Predefined Screeners ---
-@st.cache_data(ttl=600)
-def fetch_live_gainers_api(universe_pool):
-    try:
-        url = "https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved"
-        params = {"scrIds": "day_gainers", "count": 150} 
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        
-        response = requests.get(url, params=params, headers=headers, timeout=5)
-        data = response.json()
-        quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
-        
-        parsed_results = []
-        for q in quotes:
-            symbol = q.get("symbol")
-            mkt_cap_raw = q.get("marketCap", 0)
-            mkt_cap_billions = mkt_cap_raw / 1e9 if mkt_cap_raw else 0
-            
-            if universe_pool and symbol not in universe_pool:
-                continue
-            if mkt_cap_billions < 50:
-                continue
-                
-            parsed_results.append({
-                "Symbol": symbol,
-                "Name": q.get("shortName", "N/A"),
-                "Sector": resolve_sector(symbol),
-                "Price ($)": round(q.get("regularMarketPrice", 0), 2) if q.get("regularMarketPrice") else "N/A",
-                "Change ($)": round(q.get("regularMarketChange", 0), 2) if q.get("regularMarketChange") else "N/A",
-                "Change (%)": f"{q.get('regularMarketChangePercent', 0):+.2f}%" if q.get('regularMarketChangePercent') is not None else "N/A",
-                "Market Cap ($B)": round(mkt_cap_billions, 2)
-            })
-            if len(parsed_results) >= 10:
-                break
-                
-        if parsed_results:
-            return pd.DataFrame(parsed_results)
-    except Exception:
-        pass
-        
-    return pd.DataFrame(columns=["Symbol", "Name", "Sector", "Price ($)", "Change ($)", "Change (%)", "Market Cap ($B)"])
+# --- Dynamic market-data fetchers using country-specific universe discovery ---
+@st.cache_data(ttl=300)
+def fetch_live_gainers_api(region="US", country_label="United States"):
+    return fetch_country_snapshot(country_label, mode="gainers")
 
-@st.cache_data(ttl=600)
-def fetch_live_trending_api(universe_pool):
+@st.cache_data(ttl=300)
+def fetch_live_trending_api(region="US", country_label="United States"):
+    return fetch_country_snapshot(country_label, mode="trending")
+
+@st.cache_data(ttl=86400)
+def fetch_dynamic_country_universe(country_label):
+    source = COUNTRY_INDEX_SOURCES.get(country_label)
+    if not source:
+        return []
+
     try:
-        url = "https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved"
-        params = {"scrIds": "most_actives", "count": 100}
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        
-        response = requests.get(url, params=params, headers=headers, timeout=5)
-        data = response.json()
-        quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
-        
-        parsed_results = []
-        for q in quotes:
-            symbol = q.get("symbol")
-            if universe_pool and symbol not in universe_pool:
-                continue
-                
-            parsed_results.append({
-                "Symbol": symbol,
-                "Name": q.get("shortName", "N/A"),
-                "Sector": resolve_sector(symbol),
-                "Last Price ($)": round(q.get("regularMarketPrice", 0), 2) if q.get("regularMarketPrice") else "N/A",
-                "Change (%)": f"{q.get('regularMarketChangePercent', 0):+.2f}%" if q.get('regularMarketChangePercent') is not None else "N/A",
-                "Market Cap ($B)": round(q.get("marketCap", 0) / 1e9, 2) if q.get("marketCap") else "N/A",
-                "Volume": f"{q.get('regularMarketVolume', 0):,}" if q.get('regularMarketVolume') else "N/A"
-            })
-            if len(parsed_results) >= 10:
-                break
-                
-        if parsed_results:
-            return pd.DataFrame(parsed_results)
+        response = requests.get(source["url"], headers={"User-Agent": "Mozilla/5.0"}, timeout=20, verify=False)
+        response.raise_for_status()
+        if response.text.strip():
+            csv_df = pd.read_csv(StringIO(response.text))
+            symbol_col = source.get("symbol_col")
+            if symbol_col in csv_df.columns:
+                symbols = csv_df[symbol_col].astype(str).tolist()
+                clean_symbols = []
+                for s in symbols:
+                    s = s.strip()
+                    if not s or s == "nan":
+                        continue
+                    if country_label == "India":
+                        clean_symbols.append(f"{s}.NS" if not s.endswith(".NS") else s)
+                    else:
+                        clean_symbols.append(s.replace('.', '-'))
+                return clean_symbols
     except Exception:
         pass
-        
-    return pd.DataFrame(columns=["Symbol", "Name", "Sector", "Last Price ($)", "Change (%)", "Market Cap ($B)", "Volume"])
+
+    try:
+        tables = pd.read_html(source["url"])
+        for table in tables:
+            cols = {str(c).lower(): c for c in table.columns}
+            if any(k in cols for k in ["symbol", "ticker", "code", "security", "company"]):
+                for candidate in ["symbol", "ticker", "code"]:
+                    if candidate in cols:
+                        symbols = table[cols[candidate]].astype(str).tolist()
+                        return [s.strip() for s in symbols if s.strip() and s.strip() != "nan"]
+    except Exception:
+        pass
+
+    return []
+
+@st.cache_data(ttl=300)
+def fetch_country_snapshot(country_label, mode="gainers"):
+    symbols = fetch_dynamic_country_universe(country_label)[:60]
+    if not symbols:
+        return pd.DataFrame(columns=["Country", "Symbol", "Name", "Sector", "Price ($)", "Change ($)", "Change (%)", "Market Cap ($B)"])
+
+    batch = []
+    try:
+        batch = yf.download(
+            symbols,
+            period="5d",
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+            timeout=30,
+        )
+    except Exception:
+        batch = []
+
+    results = []
+    for symbol in symbols:
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info or {}
+            name = info.get("shortName") or symbol
+            sector = info.get("sector") or resolve_sector(symbol)
+            market_cap = info.get("marketCap") or 0
+            market_cap_billions = market_cap / 1e9 if market_cap else 0
+
+            if isinstance(batch, pd.DataFrame) and not batch.empty:
+                if symbol in batch.columns:
+                    hist = batch[symbol]
+                elif (symbol, "Close") in batch.columns:
+                    hist = batch[(symbol, "Close")]
+                else:
+                    hist = None
+            else:
+                hist = None
+
+            if hist is None or hist.empty or len(hist) < 2:
+                hist = ticker.history(period="5d", interval="1d", auto_adjust=False)
+
+            if hist is None or hist.empty or len(hist) < 2:
+                continue
+
+            close_series = hist["Close"].dropna() if isinstance(hist, pd.DataFrame) and "Close" in hist.columns else pd.Series([hist]).dropna()
+            if close_series.empty or len(close_series) < 2:
+                continue
+
+            current_price = info.get("regularMarketPrice") or float(close_series.iloc[-1])
+            prev_price = float(close_series.iloc[-2])
+            if prev_price <= 0:
+                continue
+            change_pct = ((current_price - prev_price) / prev_price) * 100
+            if market_cap_billions <= 0:
+                continue
+            volume = info.get("regularMarketVolume")
+            if volume is None and isinstance(hist, pd.DataFrame) and "Volume" in hist.columns:
+                volume = int(hist["Volume"].iloc[-1])
+
+            results.append({
+                "Country": country_label,
+                "Symbol": symbol,
+                "Name": name,
+                "Sector": sector,
+                "Price ($)": round(current_price, 2),
+                "Last Price ($)": round(current_price, 2),
+                "Change ($)": round(current_price - prev_price, 2),
+                "Change (%)": f"{change_pct:+.2f}%",
+                "Market Cap ($B)": round(market_cap_billions, 2),
+                "Volume": f"{int(volume):,}" if volume else "N/A"
+            })
+        except Exception:
+            continue
+
+    if mode == "gainers":
+        results = sorted(results, key=lambda x: float(x["Change (%)"].replace("%", "")), reverse=True)
+    else:
+        results = sorted(results, key=lambda x: int(str(x["Volume"]).replace(",", "")) if str(x["Volume"]).isdigit() else 0, reverse=True)
+
+    if mode == "gainers":
+        columns = ["Country", "Symbol", "Name", "Sector", "Price ($)", "Change ($)", "Change (%)", "Market Cap ($B)"]
+    else:
+        columns = ["Country", "Symbol", "Name", "Sector", "Last Price ($)", "Change (%)", "Market Cap ($B)", "Volume"]
+
+    return pd.DataFrame(results[:10], columns=columns) if results else pd.DataFrame(columns=columns)
 
 
 # --- Navigation Sidebar ---
-st.sidebar.title("🎯 Alpha Tracker Tools")
+st.sidebar.title("Tracker Tools")
 st.sidebar.markdown("---")
 
 if "current_page" not in st.session_state:
@@ -179,24 +290,41 @@ if st.session_state.current_page != "Home":
 
 # --- Main Dashboard Router ---
 if st.session_state.current_page == "Home":
-    st.caption("Live asset snapshots generated dynamically. Gainers are filtered for S&P 500/NASDAQ companies above $50B Market Cap.")
-    
-    # Generate the dynamic universe check constraints
-    universe_pool = get_dynamic_allowed_universe()
-    
-    tab1, tab2 = st.tabs(["🔥 Top Gainers", "📊 Trending Tickers"])
-    
-    with tab1:
-        st.subheader("Today's Top Market Gainers (>$50B Market Cap)")
-        with st.spinner("Streaming filtered session gainers with sector mappings..."):
-            live_gainers = fetch_live_gainers_api(universe_pool)
-            st.dataframe(live_gainers, use_container_width=True, hide_index=True)
-        
-    with tab2:
-        st.subheader("High-Volume Trending Tickers")
-        with st.spinner("Streaming high-volume active assets with sector mappings..."):
-            live_trending = fetch_live_trending_api(universe_pool)
-            st.dataframe(live_trending, use_container_width=True, hide_index=True)
+    selected_countries = st.multiselect(
+        "Select countries",
+        options=list(COUNTRY_REGION_MAP.keys()),
+        default=["United States"],
+        help="Choose one or more markets to view live top movers and trending stocks."
+    )
+
+    if not selected_countries:
+        st.warning("Please select at least one country.")
+    else:
+        tab1, tab2 = st.tabs(["🔥 Top Gainers", "📊 Trending Tickers"])
+
+        with tab1:
+            st.subheader("Today's Top Market Gainers")
+            with st.spinner("Streaming selected-market gainers..."):
+                gainers_frames = []
+                for country in selected_countries:
+                    region = COUNTRY_REGION_MAP[country]
+                    gainers_frames.append(fetch_live_gainers_api(region=region, country_label=country))
+                live_gainers = pd.concat(gainers_frames, ignore_index=True) if gainers_frames else pd.DataFrame(columns=[
+                    "Country", "Symbol", "Name", "Sector", "Price ($)", "Change ($)", "Change (%)", "Market Cap ($B)"
+                ])
+                st.dataframe(live_gainers, use_container_width=True, hide_index=True)
+
+        with tab2:
+            st.subheader("High-Volume Trending Tickers")
+            with st.spinner("Streaming selected-market trending stocks..."):
+                trending_frames = []
+                for country in selected_countries:
+                    region = COUNTRY_REGION_MAP[country]
+                    trending_frames.append(fetch_live_trending_api(region=region, country_label=country))
+                live_trending = pd.concat(trending_frames, ignore_index=True) if trending_frames else pd.DataFrame(columns=[
+                    "Country", "Symbol", "Name", "Sector", "Last Price ($)", "Change (%)", "Market Cap ($B)", "Volume"
+                ])
+                st.dataframe(live_trending, use_container_width=True, hide_index=True)
 
 elif st.session_state.current_page == "ATH":
     run_script("ATH_App.py")
