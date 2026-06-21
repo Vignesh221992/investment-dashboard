@@ -349,18 +349,14 @@ if st.session_state.current_page == "Home":
                 padding-bottom: 0.5rem;
                 scroll-snap-type: x proximity;
             }
-            .snapshot-card {
+            .snapshot-scroll > div {
                 flex: 0 0 280px;
                 min-width: 280px;
                 max-width: 280px;
-                padding: 0.75rem;
-                border: 1px solid #e5e7eb;
-                border-radius: 0.8rem;
-                background: #ffffff;
                 scroll-snap-align: start;
             }
             @media (max-width: 768px) {
-                .snapshot-card {
+                .snapshot-scroll > div {
                     flex-basis: 260px;
                     min-width: 260px;
                     max-width: 260px;
@@ -371,46 +367,35 @@ if st.session_state.current_page == "Home":
             unsafe_allow_html=True,
         )
 
-        snapshot_cards = []
-        for row in market_overview.to_dict("records"):
-            delta_color = "#22c55e" if row["Change (%)"] >= 0 else "#ef4444"
-            history = row.get("History")
-            chart_data = pd.Series(history).dropna().astype(float) if history is not None else pd.Series(dtype=float)
-            chart_data = chart_data[chart_data.notna()]
-
-            if len(chart_data) >= 2:
-                min_val = float(chart_data.min())
-                max_val = float(chart_data.max())
-                span = max_val - min_val if max_val != min_val else 1.0
-                points = []
-                for i, value in enumerate(chart_data.tolist()):
-                    x = 5 + (i / (len(chart_data) - 1)) * 90 if len(chart_data) > 1 else 50
-                    y = 38 - ((float(value) - min_val) / span) * 28
-                    points.append(f"{x:.1f},{y:.1f}")
-                polyline = f'<polyline fill="none" stroke="{delta_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" points="{" ".join(points)}" />'
-                chart_html = f"""
-                <svg width="100%" height="52" viewBox="0 0 100 40" preserveAspectRatio="none">
-                    {polyline}
-                </svg>
-                """
-            else:
-                chart_html = "<div style='height:52px;'></div>"
-
-            snapshot_cards.append(
-                f"""
-                <div class="snapshot-card">
-                    <div style="font-size:0.78rem; color:#64748b;">{row['Label']}</div>
-                    <div style="font-size:1.35rem; font-weight:600;">{row['Price']:,.2f}</div>
-                    <div style="font-size:0.9rem; color:{delta_color};">{row['Change (%)']:+.2f}%</div>
-                    {chart_html}
-                </div>
-                """
-            )
-
-        st.markdown(
-            f"<div class='snapshot-scroll'>{''.join(snapshot_cards)}</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="snapshot-scroll">', unsafe_allow_html=True)
+        cols = st.columns(len(market_overview))
+        for col, row in zip(cols, market_overview.to_dict("records")):
+            with col:
+                with st.container(border=True):
+                    st.caption(row["Label"])
+                    st.markdown(
+                        f"<div style='font-size:1.35rem; font-weight:600;'>{row['Price']:,.2f}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    delta_color = "#22c55e" if row["Change (%)"] >= 0 else "#ef4444"
+                    st.markdown(
+                        f"<div style='font-size:0.9rem; color:{delta_color};'>{row['Change (%)']:+.2f}%</div>",
+                        unsafe_allow_html=True,
+                    )
+                    history = row.get("History")
+                    chart_data = pd.Series(history).dropna().astype(float) if history is not None else pd.Series(dtype=float)
+                    chart_data = chart_data[chart_data.notna()]
+                    if len(chart_data) >= 2:
+                        chart_frame = chart_data.rename("Daily Move (%)").to_frame()
+                        chart_frame.index.name = "Date"
+                        st.line_chart(
+                            chart_frame,
+                            height=90,
+                            use_container_width=True,
+                        )
+                    else:
+                        st.write("")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     selected_countries = st.multiselect(
         "Select countries",
