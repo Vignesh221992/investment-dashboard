@@ -342,24 +342,24 @@ if st.session_state.current_page == "Home":
         st.markdown(
             """
             <style>
-            .snapshot-scroll {
-                display: flex;
+            div[data-testid="stHorizontalBlock"] {
+                display: flex !important;
+                flex-wrap: nowrap !important;
                 overflow-x: auto;
+                overflow-y: hidden;
                 gap: 12px;
                 padding-bottom: 0.5rem;
-                scroll-snap-type: x proximity;
             }
-            .snapshot-scroll > div {
-                flex: 0 0 280px;
-                min-width: 280px;
-                max-width: 280px;
-                scroll-snap-align: start;
+            div[data-testid="stHorizontalBlock"] > div {
+                flex: 0 0 280px !important;
+                min-width: 280px !important;
+                max-width: 280px !important;
             }
             @media (max-width: 768px) {
-                .snapshot-scroll > div {
-                    flex-basis: 260px;
-                    min-width: 260px;
-                    max-width: 260px;
+                div[data-testid="stHorizontalBlock"] > div {
+                    flex: 0 0 260px !important;
+                    min-width: 260px !important;
+                    max-width: 260px !important;
                 }
             }
             </style>
@@ -367,7 +367,6 @@ if st.session_state.current_page == "Home":
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div class="snapshot-scroll">', unsafe_allow_html=True)
         cols = st.columns(len(market_overview))
         for col, row in zip(cols, market_overview.to_dict("records")):
             with col:
@@ -395,7 +394,6 @@ if st.session_state.current_page == "Home":
                         )
                     else:
                         st.write("")
-        st.markdown('</div>', unsafe_allow_html=True)
 
     selected_countries = st.multiselect(
         "Select countries",
