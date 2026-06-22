@@ -5,6 +5,61 @@ import requests
 import streamlit as st
 import yfinance as yf
 
+st.markdown(
+    """
+    <style>
+    :root {
+        --card-bg: #0d1424;
+        --card-border: #23375c;
+        --card-text: #eef4ff;
+        --card-head: #101d36;
+        --card-muted: #9fb3da;
+    }
+
+    @media (prefers-color-scheme: light) {
+        :root {
+            --card-bg: #ffffff;
+            --card-border: #d7deea;
+            --card-text: #0f172a;
+            --card-head: #f8fafc;
+            --card-muted: #475569;
+        }
+    }
+
+    div[data-testid="stDataFrame"] {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 10px;
+    }
+    div[data-testid="stDataFrame"] table {
+        background: var(--card-bg);
+        color: var(--card-text);
+    }
+    div[data-testid="stDataFrame"] thead tr {
+        background: var(--card-head);
+    }
+    div[data-testid="stDataFrame"] th {
+        color: var(--card-muted) !important;
+        border-bottom: 1px solid var(--card-border) !important;
+    }
+    div[data-testid="stDataFrame"] td {
+        color: var(--card-text) !important;
+        border-bottom: 1px solid var(--card-border) !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 10px;
+        padding: 0.6rem;
+    }
+    div[data-testid="stHorizontalBlock"] {
+        gap: 12px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 MEGA_CAP_SECTORS = {
     "AAPL": "Technology", "MSFT": "Technology", "NVDA": "Technology", "AMZN": "Consumer Cyclical",
     "META": "Communication Services", "GOOGL": "Communication Services", "GOOG": "Communication Services",

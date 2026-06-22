@@ -64,10 +64,18 @@ def build_table(tickers, start_date, end_date):
         df = df.sort_values("Absolute_Return_%", ascending=False).reset_index(drop=True)
     return df, failed
 
-start_date = st.date_input("Start date", datetime(2024, 9, 30))
-end_date = st.date_input("End date", datetime.today())
+start_date = st.date_input(
+    "Start date",
+    datetime(2024, 9, 30),
+    key="nifty50_start_date"
+)
+end_date = st.date_input(
+    "End date",
+    datetime.today(),
+    key="nifty50_end_date"
+)
 
-if st.button("Build ranking"):
+if st.button("Build ranking", key="nifty50_build_button"):
     with st.spinner("Downloading Yahoo Finance data..."):
         rank_df, failed = build_table(TICKERS, start_date, end_date)
 

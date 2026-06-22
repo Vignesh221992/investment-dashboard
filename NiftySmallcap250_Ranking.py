@@ -84,13 +84,21 @@ def build_table(tickers, start_date, end_date):
     return df, failed
 
 # Core UI execution inputs
-start_date = st.date_input("Start date", datetime(2024, 9, 30))
-end_date = st.date_input("End date", datetime.today())
+start_date = st.date_input(
+    "Start date",
+    datetime(2024, 9, 30),
+    key="smallcap250_start_date"
+)
+end_date = st.date_input(
+    "End date",
+    datetime.today(),
+    key="smallcap250_end_date"
+)
 
 # Fetch dynamic tracking universe 
 tickers_pool = get_smallcap250_tickers_official()
 
-if st.button("Build ranking"):
+if st.button("Build ranking", key="smallcap250_build_button"):
     if tickers_pool is None or len(tickers_pool) == 0:
         st.error("NSE official archive registries are currently busy. Please click the button again in a few moments.")
     else:
